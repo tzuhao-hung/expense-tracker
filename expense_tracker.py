@@ -22,6 +22,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Text,
+    Table,
     case,
     create_engine,
     delete,
@@ -59,31 +60,15 @@ class ExpenseTracker:
         self.metadata = MetaData()
 
         # Table definitions
-        self.users = self._define_users()
-        self.personal_transactions = self._define_personal_transactions()
-        self.shared_expenses = self._define_shared_expenses()
-        self.shared_expense_splits = self._define_shared_expense_splits()
-
-        # Indexes
-        Index(
-            "idx_personal_transactions_user_date",
-            self.personal_transactions.c.user_id,
-            self.personal_transactions.c.date,
-        )
-        Index("idx_shared_expenses_date", self.shared_expenses.c.date)
-
-        self.metadata.create_all(self.engine)
-
-    def _define_users(self):
-        return self._table(
+        self.users = Table(
             "users",
+            self.metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
             Column("name", String, nullable=False, unique=True),
         )
-
-    def _define_personal_transactions(self):
-        return self._table(
+        self.personal_transactions = Table(
             "personal_transactions",
+            self.metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
             Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
             Column("type", String, nullable=False),
@@ -94,10 +79,9 @@ class ExpenseTracker:
             CheckConstraint("type IN ('income','expense')", name="chk_pt_type"),
             CheckConstraint("amount > 0", name="chk_pt_amount"),
         )
-
-    def _define_shared_expenses(self):
-        return self._table(
+        self.shared_expenses = Table(
             "shared_expenses",
+            self.metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
             Column("title", String, nullable=False),
             Column("total_amount", Float, nullable=False),
@@ -107,10 +91,9 @@ class ExpenseTracker:
             Column("note", Text, nullable=False, default=""),
             CheckConstraint("total_amount > 0", name="chk_se_total"),
         )
-
-    def _define_shared_expense_splits(self):
-        return self._table(
+        self.shared_expense_splits = Table(
             "shared_expense_splits",
+            self.metadata,
             Column("id", Integer, primary_key=True, autoincrement=True),
             Column(
                 "shared_expense_id",
@@ -125,16 +108,15 @@ class ExpenseTracker:
             CheckConstraint("split_value >= 0", name="chk_split_value"),
         )
 
-    def _table(self, name: str, *cols: Any):
-        return self.metadata.tables.get(name) or self._create_table(name, *cols)
+        # Indexes
+        Index(
+            "idx_personal_transactions_user_date",
+            self.personal_transactions.c.user_id,
+            self.personal_transactions.c.date,
+        )
+        Index("idx_shared_expenses_date", self.shared_expenses.c.date)
 
-    def _create_table(self, name: str, *cols: Any):
-        return self.metadata.tables.setdefault(name, self.metadata.tables.get(name) or self._make_table(name, *cols))
-
-    def _make_table(self, name: str, *cols: Any):
-        from sqlalchemy import Table
-
-        return Table(name, self.metadata, *cols)
+        self.metadata.create_all(self.engine)
 
     @contextmanager
     def _session(self) -> Iterable[Session]:
