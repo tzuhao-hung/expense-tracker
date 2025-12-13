@@ -280,7 +280,7 @@
     <h3>Recent shared expenses</h3>
     <div class="table-scroll">
       <table class="min-wide">
-        <tr><th>Title</th><th>Paid by</th><th>Total</th><th>Category</th><th>Date</th><th>Note</th><th>Actions</th></tr>
+        <tr><th>Title</th><th>Paid by</th><th>Total</th><th>Category</th><th>Date</th><th>Splits</th><th>Note</th><th>Actions</th></tr>
         {% for row in shared_entries %}
           <tr>
             <td>{{ row.title }}</td>
@@ -288,6 +288,20 @@
             <td class="mono num">{{ "%.2f"|format(row.total_amount) }} $</td>
             <td>{{ row.category }}</td>
             <td class="mono">{{ row.date }}</td>
+            <td style="min-width:160px;">
+              {% if row.splits %}
+                <div class="grid" style="gap:6px;">
+                  {% for s in row.splits %}
+                    <span class="pill" style="background: rgba(198,229,255,0.35);">
+                      {{ s.user }} · {{ "%.1f"|format(s.percent) }}%
+                      {% if s.type == 'fixed' %}(fixed {{ "%.2f"|format(s.share) }}$){% endif %}
+                    </span>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <span class="subtitle">—</span>
+              {% endif %}
+            </td>
             <td>{{ row.note }}</td>
             <td class="row">
               <a href="{{ url_for('edit_shared', expense_id=row.id) }}" class="pill">Edit</a>

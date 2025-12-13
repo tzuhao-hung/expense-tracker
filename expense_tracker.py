@@ -568,8 +568,38 @@ class ExpenseTracker:
             .limit(limit)
         )
         with self._session() as session:
-            res = session.execute(stmt).mappings().all()
-            return [dict(row) for row in res]
+            expenses = session.execute(stmt).mappings().all()
+            results: List[Dict[str, Any]] = []
+            for exp in expenses:
+                splits_rows = session.execute(
+                    select(
+                        self.shared_expense_splits.c.user_id,
+                        self.shared_expense_splits.c.split_type,
+                        self.shared_expense_splits.c.split_value,
+                        self.users.c.name.label("user_name"),
+                    )
+                    .join(self.users, self.users.c.id == self.shared_expense_splits.c.user_id)
+                    .where(self.shared_expense_splits.c.shared_expense_id == exp["id"])
+                ).mappings().all()
+                shares = self._compute_shares_from_splits(float(exp["total_amount"]), splits_rows)
+                display_splits = []
+                for s in splits_rows:
+                    uid = int(s["user_id"])
+                    share_amt = float(shares.get(uid, 0.0))
+                    percent = round((share_amt / float(exp["total_amount"]) * 100), 1) if exp["total_amount"] else 0.0
+                    display_splits.append(
+                        {
+                            "user": s["user_name"],
+                            "type": s["split_type"],
+                            "value": float(s["split_value"]),
+                            "share": round(share_amt, 2),
+                            "percent": percent,
+                        }
+                    )
+                e = dict(exp)
+                e["splits"] = display_splits
+                results.append(e)
+            return results
 
     def calculate_shared_balances(self) -> Dict[str, object]:
         with self._session() as session:
