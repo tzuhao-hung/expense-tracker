@@ -156,6 +156,11 @@
       </nav>
     </header>
   <main class="container">
+    {% if using_sqlite %}
+      <div class="panel flash" style="background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.4);">
+        <strong>Local / SQLite 模式</strong>：資料存本機檔案，若在 Render 未設 DATABASE_URL，資料會在重啟後消失。請在 Render 設定 Postgres 的 DATABASE_URL。
+      </div>
+    {% endif %}
     {% with messages = get_flashed_messages() %}
       {% if messages %}
         <div class="panel flash">

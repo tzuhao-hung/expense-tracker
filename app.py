@@ -10,10 +10,16 @@ from expense_tracker import DEFAULT_CATEGORIES, ExpenseTracker
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev")  # Set SECRET_KEY in production.
 db_url = os.environ.get("DATABASE_URL")
+is_render = os.environ.get("RENDER", "").lower() == "true"
 if not db_url:
+    if is_render:
+        raise RuntimeError(
+            "DATABASE_URL not set. On Render, set DATABASE_URL to your Postgres URL (e.g., Neon) to avoid data loss."
+        )
     db_path = os.environ.get("DB_PATH", "expenses.db")
     db_url = f"sqlite:///{db_path}"
 tracker = ExpenseTracker(db_url)
+app.config["USING_SQLITE"] = db_url.startswith("sqlite")
 
 
 def _current_year_month() -> Dict[str, int]:
@@ -77,6 +83,7 @@ def dashboard():
         personal_entries=personal_entries,
         shared_entries=shared_entries,
         recent_settlements=recent_settlements,
+        using_sqlite=app.config.get("USING_SQLITE", False),
     )
 
 
