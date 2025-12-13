@@ -5,22 +5,18 @@
       <option value="{{ u.name }}"></option>
     {% endfor %}
   </datalist>
-  <section class="panel">
-    <div class="grid cols-2" style="align-items:flex-start;">
-      <div>
-        <h1 style="margin-bottom:6px;">Monthly Overview</h1>
-        <div class="subtitle">Track each person’s income, shared spend, and savings.</div>
+  <section class="panel" style="padding:12px 14px;">
+    <div class="row" style="justify-content: space-between; gap:12px;">
+      <div class="row" style="gap:8px;">
+        <span class="pill" style="background: rgba(255,178,194,0.3);">📅 Monthly overview</span>
+        <div class="subtitle">Quick glance only—scroll down for details.</div>
       </div>
-      <form method="get" class="grid cols-2" style="max-width:320px; margin-left:auto;">
-        <div>
-          <label for="month">Month</label>
-          <input id="month" name="month" type="number" min="1" max="12" value="{{ ym.month }}">
-        </div>
-        <div>
-          <label for="year">Year</label>
-          <input id="year" name="year" type="number" min="2000" value="{{ ym.year }}">
-        </div>
-        <button type="submit">Apply</button>
+      <form method="get" class="row" style="gap:8px;">
+        <label for="month" class="subtitle">Month</label>
+        <input style="width:70px" id="month" name="month" type="number" min="1" max="12" value="{{ ym.month }}">
+        <label for="year" class="subtitle">Year</label>
+        <input style="width:90px" id="year" name="year" type="number" min="2000" value="{{ ym.year }}">
+        <button type="submit" style="padding:9px 12px;">Apply</button>
       </form>
     </div>
   </section>
@@ -57,9 +53,9 @@
           <div class="panel" style="padding:12px;">
             <strong>{{ data.name }}</strong>
             <div class="grid" style="margin-top:6px; grid-template-columns: 1fr;">
-              <span class="pill">Income {{ "%.2f"|format(data.personal_income) }} $</span>
-              <span class="pill">Spend {{ "%.2f"|format(data.total_expenses) }} $</span>
-              <span class="pill">Savings {{ "%.2f"|format(data.savings) }} $</span>
+              <span class="pill" style="background: rgba(198,229,255,0.35);">Income {{ "%.2f"|format(data.personal_income) }} $</span>
+              <span class="pill" style="background: rgba(255,178,194,0.30);">Spend {{ "%.2f"|format(data.total_expenses) }} $</span>
+              <span class="pill" style="background: rgba(181,247,181,0.32);">Savings {{ "%.2f"|format(data.savings) }} $</span>
             </div>
           </div>
         {% else %}
@@ -72,11 +68,12 @@
   <section class="grid cols-2">
     <div class="panel">
       <h3>Personal expense</h3>
+      <div class="subtitle" style="margin-bottom:6px;">Type名字即可自動建新使用者，或直接選既有姓名。</div>
       <form method="post" action="{{ url_for('add_personal') }}">
         <div class="grid cols-2">
           <div>
             <label>User</label>
-            <input name="user_name" list="user-names" placeholder="Type a name" required>
+            <input name="user_name" list="user-names" placeholder="輸入名字（或選現有）" required>
           </div>
           <div>
             <label>Type</label>
@@ -89,7 +86,7 @@
         <div class="grid cols-2">
           <div>
             <label>Amount</label>
-            <input name="amount" type="number" min="0" step="0.01" required>
+            <input name="amount" type="number" min="0" step="0.01" placeholder="0.00" required>
           </div>
           <div>
             <label>Date</label>
@@ -107,7 +104,7 @@
           </div>
           <div>
             <label>Note</label>
-            <input name="note" placeholder="Optional">
+            <input name="note" placeholder="想補充什麼嗎？">
           </div>
         </div>
         <button type="submit">Save personal</button>
@@ -116,15 +113,16 @@
 
     <div class="panel">
       <h3>Shared expense</h3>
+      <div class="subtitle" style="margin-bottom:6px;">先填總額、付款人，再新增參與者。</div>
       <form method="post" action="{{ url_for('add_shared') }}" id="quick-shared">
         <div class="grid cols-2">
           <div>
             <label>Title</label>
-            <input name="title" placeholder="e.g., Dinner" required>
+            <input name="title" placeholder="例如：晚餐、超市" required>
           </div>
           <div>
             <label>Total</label>
-            <input name="total_amount" type="number" min="0" step="0.01" required>
+            <input name="total_amount" type="number" min="0" step="0.01" placeholder="0.00" required>
           </div>
         </div>
         <div class="grid cols-2">
@@ -152,7 +150,7 @@
           </div>
           <div>
             <label>Note</label>
-            <input name="note" placeholder="Optional">
+            <input name="note" placeholder="可填付款方式或備註">
           </div>
         </div>
         <h4>Participants</h4>

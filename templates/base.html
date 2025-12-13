@@ -6,23 +6,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     :root {
-      --bg: #f8fafc;
-      --panel: #ffffff;
-      --muted: #6b7280;
-      --accent: #10b981;
-      --accent-2: #60a5fa;
-      --danger: #f97316;
-      --border: rgba(15, 23, 42, 0.08);
-      --radius: 16px;
-      --text: #0f172a;
+      --bg: #fdf6ff;
+      --panel: #fff9ff;
+      --muted: #7c7d8a;
+      --accent: #ffb2c2;
+      --accent-2: #c6e5ff;
+      --danger: #f59e0b;
+      --border: rgba(109, 90, 122, 0.12);
+      --radius: 18px;
+      --text: #2d2443;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Work Sans", "Inter", system-ui, -apple-system, sans-serif;
-      background: radial-gradient(circle at 20% 20%, rgba(96,165,250,0.25), transparent 30%),
-                  radial-gradient(circle at 80% 10%, rgba(16,185,129,0.22), transparent 26%),
-                  var(--bg);
+      font-family: "Nunito", "Inter", system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(circle at 20% 18%, rgba(255, 178, 194, 0.25), transparent 28%),
+        radial-gradient(circle at 82% 12%, rgba(198, 229, 255, 0.30), transparent 28%),
+        radial-gradient(circle at 12% 70%, rgba(255, 222, 173, 0.25), transparent 24%),
+        var(--bg);
       color: var(--text);
       min-height: 100vh;
     }
@@ -31,9 +33,9 @@
       position: sticky;
       top: 0;
       backdrop-filter: blur(8px);
-      background: rgba(248, 250, 252, 0.9);
-      border-bottom: 1px solid var(--border);
-      padding: 12px 18px;
+      background: rgba(255, 249, 255, 0.9);
+      border-bottom: 1px solid rgba(109, 90, 122, 0.08);
+      padding: 12px 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -46,18 +48,18 @@
       background: rgba(255, 255, 255, 0.7);
     }
     .container {
-      max-width: 1100px;
-      margin: 24px auto 80px;
+      max-width: 960px;
+      margin: 18px auto 70px;
       padding: 0 16px;
       display: grid;
       gap: 16px;
     }
     .panel {
-      background: rgba(255, 255, 255, 0.92);
+      background: #fffdfd;
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 16px 18px;
-      box-shadow: 0 14px 30px rgba(15,23,42,0.10);
+      padding: 14px 16px;
+      box-shadow: 0 10px 24px rgba(45,36,67,0.08);
     }
     h1, h2, h3 {
       margin: 0 0 10px;
@@ -81,13 +83,13 @@
     button {
       padding: 11px 14px;
       border: none;
-      border-radius: 10px;
+      border-radius: 12px;
       background: linear-gradient(120deg, var(--accent), var(--accent-2));
-      color: white;
-      font-weight: 700;
+      color: #2d2443;
+      font-weight: 800;
       cursor: pointer;
       transition: transform 150ms ease, box-shadow 150ms ease;
-      box-shadow: 0 12px 30px rgba(96,165,250,0.25);
+      box-shadow: 0 10px 24px rgba(255,178,194,0.35);
     }
     button:hover { transform: translateY(-1px); }
     .grid { display: grid; gap: 12px; }
@@ -116,6 +118,17 @@
     }
     .mono { font-family: "SFMono-Regular", Menlo, Consolas, monospace; white-space: nowrap; }
     .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    body::before, body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        radial-gradient(2px 2px at 10% 30%, rgba(45,36,67,0.10), transparent 40%),
+        radial-gradient(2px 2px at 80% 70%, rgba(45,36,67,0.12), transparent 40%);
+      opacity: 0.5;
+    }
 
     @media (max-width: 768px) {
       header { flex-direction: column; align-items: flex-start; gap: 10px; position: sticky; }
