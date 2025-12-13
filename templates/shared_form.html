@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="panel">
+    <h1>{{ expense and "Edit" or "Add" }} shared expense</h1>
+    <form method="post" id="shared-form">
+      <div class="grid cols-2">
+        <div>
+          <label>Title</label>
+          <input name="title" required placeholder="e.g., Grocery run" value="{{ expense.title if expense else '' }}">
+        </div>
+        <div>
+          <label>Total amount</label>
+          <input name="total_amount" type="number" min="0" step="0.01" required value="{{ expense.total_amount if expense else '' }}">
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div>
+          <label>Date</label>
+          <input name="date" type="date" value="{{ expense.date if expense else today }}" required>
+        </div>
+        <div>
+          <label>Category</label>
+          <select name="category">
+            {% for c in categories %}
+              <option value="{{ c }}" {% if expense and expense.category==c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div>
+          <label>Paid by</label>
+          <select name="paid_by" required>
+            {% for u in users %}
+              <option value="{{ u.id }}" {% if expense and expense.paid_by_user_id==u.id %}selected{% endif %}>{{ u.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Note</label>
+          <input name="note" placeholder="Optional" value="{{ expense.note if expense else '' }}">
+        </div>
+      </div>
+
+      <h3>Participants &amp; splits</h3>
+      <div class="subtitle">Use percentage or fixed amounts. Payer must be listed.</div>
+      <div id="participants" class="grid" style="gap:8px;"></div>
+      <button type="button" id="add-participant">+ Add participant</button>
+
+      <button type="submit" style="margin-top:12px;">Save shared expense</button>
+    </form>
+  </section>
+
+  <template id="participant-row">
+    <div class="panel">
+      <div class="grid cols-2">
+        <div>
+          <label>User</label>
+          <select name="participant_user_id" required>
+            <option value="">Choose user</option>
+            {% for u in users %}
+              <option value="{{ u.id }}">{{ u.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Split type</label>
+          <select name="participant_split_type">
+            <option value="percentage">Percentage</option>
+            <option value="fixed">Fixed</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div>
+          <label>Value</label>
+          <input name="participant_value" type="number" min="0" step="0.01">
+        </div>
+        <div class="row" style="margin-top:26px;">
+          <button type="button" class="remove-row" style="background: rgba(249,115,22,0.2); color:#facc15; box-shadow:none;">Remove</button>
+        </div>
+      </div>
+    </div>
+  </template>
+  {% include "shared_edit_participants.html" %}
+
+  <script>
+    const container = document.getElementById("participants");
+    const template = document.getElementById("participant-row");
+    const addBtn = document.getElementById("add-participant");
+
+    function addRow() {
+      const clone = template.content.cloneNode(true);
+      clone.querySelector(".remove-row").addEventListener("click", (e) => {
+        e.target.closest(".panel").remove();
+      });
+      container.appendChild(clone);
+    }
+    addBtn.addEventListener("click", addRow);
+    // Start with two rows to save clicks.
+    addRow();
+    addRow();
+  </script>
+{% endblock %}

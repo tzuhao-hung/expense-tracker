@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="panel">
+    <h1>Shared balances</h1>
+    <div class="subtitle">Net positions and suggested settlements across all shared expenses.</div>
+    <h3>Net by user</h3>
+    <div class="row">
+      {% for uid, bal in balances.net_by_user.items() %}
+        <div class="pill">{{ user_map[uid] }}: {{ "%.2f"|format(bal) }}</div>
+      {% endfor %}
+    </div>
+    <h3>Suggested settlements</h3>
+    <table>
+      <tr><th>Payer</th><th>Receiver</th><th>Amount</th></tr>
+      {% for s in balances.settlements %}
+        <tr>
+          <td>{{ user_map[s.payer_id] }}</td>
+          <td>{{ user_map[s.receiver_id] }}</td>
+          <td class="mono">{{ "%.2f"|format(s.amount) }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="3">No settlements needed.</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+{% endblock %}

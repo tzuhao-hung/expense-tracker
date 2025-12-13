@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="panel">
+    <h1>{{ tx and "Edit" or "Add" }} personal income/expense</h1>
+    <form method="post">
+      <div class="grid cols-2">
+        <div>
+          <label>User</label>
+          <select name="user_id">
+            <option value="">Type name below</option>
+            {% for u in users %}
+              <option value="{{ u.id }}" {% if tx and tx.user_id==u.id %}selected{% endif %}>{{ u.name }}</option>
+            {% endfor %}
+          </select>
+          <input name="user_name" list="user-names" placeholder="Or type a name" style="margin-top:6px;">
+          <datalist id="user-names">
+            {% for u in users %}
+              <option value="{{ u.name }}"></option>
+            {% endfor %}
+          </datalist>
+        </div>
+        <div>
+          <label>Type</label>
+          <select name="type">
+            <option value="income" {% if tx and tx.type=='income' %}selected{% endif %}>Income</option>
+            <option value="expense" {% if tx and tx.type=='expense' %}selected{% endif %}>Expense</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div>
+          <label>Amount</label>
+          <input name="amount" type="number" min="0" step="0.01" required value="{{ tx.amount if tx else '' }}">
+        </div>
+        <div>
+          <label>Date</label>
+          <input name="date" type="date" value="{{ tx.date if tx else today }}" required>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div>
+          <label>Category</label>
+          <select name="category">
+            {% for c in categories %}
+              <option value="{{ c }}" {% if tx and tx.category==c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Note</label>
+          <input name="note" placeholder="Optional" value="{{ tx.note if tx else '' }}">
+        </div>
+      </div>
+      <button type="submit">Save transaction</button>
+    </form>
+  </section>
+{% endblock %}

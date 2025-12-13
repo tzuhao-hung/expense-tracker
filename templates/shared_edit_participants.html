@@ -1,0 +1,32 @@
+{% if splits %}
+  {% for s in splits %}
+    <div class="panel">
+      <div class="grid cols-2">
+        <div>
+          <label>User</label>
+          <select name="participant_user_id" required>
+            {% for u in users %}
+              <option value="{{ u.id }}" {% if s.user_id==u.id %}selected{% endif %}>{{ u.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Split type</label>
+          <select name="participant_split_type">
+            <option value="percentage" {% if s.split_type=='percentage' %}selected{% endif %}>Percentage</option>
+            <option value="fixed" {% if s.split_type=='fixed' %}selected{% endif %}>Fixed</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid cols-2">
+        <div>
+          <label>Value</label>
+          <input name="participant_value" type="number" min="0" step="0.01" value="{{ s.split_value }}">
+        </div>
+        <div class="row" style="margin-top:26px;">
+          <button type="button" class="remove-row" style="background: rgba(249,115,22,0.2); color:#facc15; box-shadow:none;">Remove</button>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+{% endif %}

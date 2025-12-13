@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+{% block content %}
+  <datalist id="user-names">
+    {% for u in users %}
+      <option value="{{ u.name }}"></option>
+    {% endfor %}
+  </datalist>
+  <section class="panel">
+    <div class="row" style="justify-content: space-between;">
+      <div>
+        <h1>Monthly Overview</h1>
+        <div class="subtitle">Track each person’s income, personal spend, shared share, and savings.</div>
+      </div>
+      <form method="get" class="row">
+        <label for="month">Month</label>
+        <input style="width:100px" id="month" name="month" type="number" min="1" max="12" value="{{ ym.month }}">
+        <label for="year">Year</label>
+        <input style="width:120px" id="year" name="year" type="number" min="2000" value="{{ ym.year }}">
+        <button type="submit">Apply</button>
+      </form>
+    </div>
+    <div class="grid cols-2" style="margin-top:14px;">
+      <div class="panel">
+        <h3>Per person at a glance</h3>
+        <div class="grid cols-2">
+          {% for uid, data in analysis.per_user.items() %}
+            <div class="panel" style="padding:12px;">
+              <strong>{{ data.name }}</strong>
+              <div class="row" style="margin-top:6px;">
+                <span class="pill">Income {{ "%.2f"|format(data.personal_income) }} $</span>
+                <span class="pill">Spend {{ "%.2f"|format(data.total_expenses) }} $</span>
+                <span class="pill">Savings {{ "%.2f"|format(data.savings) }} $</span>
+              </div>
+            </div>
+          {% else %}
+            <div class="subtitle">Add a user to get started.</div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Quick actions</h3>
+        <div class="row">
+          <a class="pill" href="{{ url_for('add_personal') }}">+ Personal income/expense</a>
+          <a class="pill" href="{{ url_for('add_shared') }}">+ Shared expense</a>
+        </div>
+        <form action="{{ url_for('create_user') }}" method="post" style="margin-top:10px;">
+          <label>Add user</label>
+          <div class="row">
+            <input name="name" placeholder="Name">
+            <button type="submit">Save</button>
+          </div>
+        </form>
+        <div style="margin-top:12px;">
+          <label>People</label>
+          <div class="row">
+            {% for u in users %}
+              <form method="post" action="{{ url_for('delete_user', user_id=u.id) }}" style="display:flex;align-items:center;gap:6px;">
+                <span class="pill">{{ u.name }}</span>
+                <button type="submit" style="background: rgba(249,115,22,0.9); box-shadow:none;">Delete</button>
+              </form>
+            {% else %}
+              <div class="subtitle">No users yet.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid cols-2">
+    <div class="panel">
+      <h3>Personal expense</h3>
+      <form method="post" action="{{ url_for('add_personal') }}">
+        <div class="grid cols-2">
+          <div>
+            <label>User</label>
+            <input name="user_name" list="user-names" placeholder="Type a name" required>
+          </div>
+          <div>
+            <label>Type</label>
+            <select name="type">
+              <option value="income">Income</option>
+              <option value="expense">Expense</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div>
+            <label>Amount</label>
+            <input name="amount" type="number" min="0" step="0.01" required>
+          </div>
+          <div>
+            <label>Date</label>
+            <input name="date" type="date" value="{{ today }}" required>
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div>
+            <label>Category</label>
+            <select name="category">
+              {% for c in categories %}
+                <option value="{{ c }}">{{ c }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Note</label>
+            <input name="note" placeholder="Optional">
+          </div>
+        </div>
+        <button type="submit">Save personal</button>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h3>Shared expense</h3>
+      <form method="post" action="{{ url_for('add_shared') }}" id="quick-shared">
+        <div class="grid cols-2">
+          <div>
+            <label>Title</label>
+            <input name="title" placeholder="e.g., Dinner" required>
+          </div>
+          <div>
+            <label>Total</label>
+            <input name="total_amount" type="number" min="0" step="0.01" required>
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div>
+            <label>Paid by</label>
+            <select name="paid_by" required>
+              {% for u in users %}
+                <option value="{{ u.id }}">{{ u.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Date</label>
+            <input name="date" type="date" value="{{ today }}" required>
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div>
+            <label>Category</label>
+            <select name="category">
+              {% for c in categories %}
+                <option value="{{ c }}">{{ c }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Note</label>
+            <input name="note" placeholder="Optional">
+          </div>
+        </div>
+        <h4>Participants</h4>
+        <div id="quick-participants" class="grid" style="gap:8px;"></div>
+        <button type="button" id="quick-add-participant" style="background: rgba(96,165,250,0.85);">+ Participant</button>
+        <button type="submit" style="margin-top:10px;">Save shared</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>Per person</h3>
+    <div class="table-scroll">
+      <table class="min-wide">
+        <tr>
+          <th>User</th>
+          <th>Income</th>
+          <th>Personal</th>
+          <th>Shared share</th>
+          <th>Total spend</th>
+          <th>Savings</th>
+        </tr>
+        {% for uid, data in analysis.per_user.items() %}
+          <tr>
+            <td>{{ data.name }}</td>
+            <td class="mono num">{{ "%.2f"|format(data.personal_income) }} $</td>
+            <td class="mono num">{{ "%.2f"|format(data.personal_expenses) }} $</td>
+            <td class="mono num">{{ "%.2f"|format(data.shared_share) }} $</td>
+            <td class="mono num">{{ "%.2f"|format(data.total_expenses) }} $</td>
+            <td class="mono num">{{ "%.2f"|format(data.savings) }} $</td>
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>Recent personal expenses/income</h3>
+    <div class="table-scroll">
+      <table class="min-wide">
+        <tr><th>User</th><th>Type</th><th>Amount</th><th>Category</th><th>Date</th><th>Note</th><th>Actions</th></tr>
+        {% for row in personal_entries %}
+          <tr>
+            <td>{{ row.user_name }}</td>
+            <td>{{ row.type }}</td>
+            <td class="mono num">{{ "%.2f"|format(row.amount) }} $</td>
+            <td>{{ row.category }}</td>
+            <td class="mono">{{ row.date }}</td>
+            <td>{{ row.note }}</td>
+            <td class="row">
+              <a href="{{ url_for('edit_personal', tx_id=row.id) }}" class="pill">Edit</a>
+              <form method="post" action="{{ url_for('delete_personal', tx_id=row.id) }}" style="margin:0;">
+                <button type="submit" style="background:rgba(239,68,68,0.85);box-shadow:none;">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7">No personal records yet.</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>Recent shared expenses</h3>
+    <div class="table-scroll">
+      <table class="min-wide">
+        <tr><th>Title</th><th>Paid by</th><th>Total</th><th>Category</th><th>Date</th><th>Note</th><th>Actions</th></tr>
+        {% for row in shared_entries %}
+          <tr>
+            <td>{{ row.title }}</td>
+            <td>{{ row.paid_by }}</td>
+            <td class="mono num">{{ "%.2f"|format(row.total_amount) }} $</td>
+            <td>{{ row.category }}</td>
+            <td class="mono">{{ row.date }}</td>
+            <td>{{ row.note }}</td>
+            <td class="row">
+              <a href="{{ url_for('edit_shared', expense_id=row.id) }}" class="pill">Edit</a>
+              <form method="post" action="{{ url_for('delete_shared', expense_id=row.id) }}" style="margin:0;">
+                <button type="submit" style="background:rgba(239,68,68,0.85);box-shadow:none;">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7">No shared records yet.</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>Visual breakdown</h3>
+    <div class="grid cols-2">
+      <div>
+        <h4>Spend by category (pie)</h4>
+        <canvas id="cat-chart" width="320" height="320"></canvas>
+        <div class="subtitle" id="cat-info">Click a slice to see details.</div>
+      </div>
+      <div>
+        <h4>Spend by person (pie)</h4>
+        <canvas id="user-chart" width="320" height="320"></canvas>
+        <div class="subtitle" id="user-info">Click a slice to see details.</div>
+      </div>
+    </div>
+    <div class="table-scroll" style="margin-top:12px;">
+      <table class="min-wide">
+        <tr><th>Category</th><th>Spend</th></tr>
+        {% for cat, amt in analysis.category_breakdown.items() %}
+          <tr>
+            <td>{{ cat }}</td>
+            <td class="mono num">{{ "%.2f"|format(amt) }} $</td>
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h3>Shared balances</h3>
+    <div class="grid cols-2">
+      <div>
+        <h4>Net by person</h4>
+        {% for uid, bal in balances.net_by_user.items() %}
+          <div class="pill" style="background: {{ 'rgba(16,185,129,0.2)' if bal>0 else 'rgba(239,68,68,0.15)' }}">
+            {{ balances.usernames[uid] if balances.get('usernames') else uid }}:
+            {{ "%.2f"|format(bal) }} $ {{ 'owed to them' if bal>0 else 'owes' }}
+          </div>
+        {% endfor %}
+      </div>
+      <div>
+        <h4>Who pays whom</h4>
+        {% if balances.settlements %}
+          <ul style="padding-left:18px; line-height:1.6;">
+            {% for s in balances.settlements %}
+              <li>
+                <strong>{{ balances.usernames[s.payer_id] }}</strong>
+                needs to pay
+                <strong>{{ balances.usernames[s.receiver_id] }}</strong>
+                <span class="mono">{{ "%.2f"|format(s.amount) }} $</span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="subtitle">All settled.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const chartData = {{ chart_data|tojson }};
+    const nameDataList = document.getElementById("user-names");
+    if (!nameDataList) {
+      const dl = document.createElement("datalist");
+      dl.id = "user-names";
+      document.body.appendChild(dl);
+    }
+    const container = document.getElementById("quick-participants");
+    const userOptions = {{ users_json|tojson }};
+    const optionsHtml = userOptions.map(u => `<option value=\"${u.id}\">${u.name}</option>`).join("");
+    const tmpl = (name = "", type = "percentage", value = "") => `
+      <div class="panel" style="padding:12px;">
+        <div class="grid cols-2">
+          <div>
+            <label>Participant</label>
+            <select name="participant_user_id" required>
+              <option value="">Choose user</option>
+              ${optionsHtml}
+            </select>
+          </div>
+          <div>
+            <label>Type</label>
+            <select name="participant_split_type">
+              <option value="percentage" ${type==="percentage"?"selected":""}>Percentage</option>
+              <option value="fixed" ${type==="fixed"?"selected":""}>Fixed</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div>
+            <label>Value</label>
+            <input name="participant_value" type="number" min="0" step="0.01" value="${value}">
+          </div>
+          <div style="display:flex;align-items:flex-end;">
+            <button type="button" class="remove-row" style="background:rgba(249,115,22,0.9);box-shadow:none;">Remove</button>
+          </div>
+        </div>
+      </div>`;
+    const addRow = () => {
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = tmpl();
+      wrapper.querySelector(".remove-row").onclick = () => wrapper.remove();
+      container.appendChild(wrapper);
+    };
+    document.getElementById("quick-add-participant").onclick = addRow;
+    addRow();
+
+    function drawPie(canvasId, labels, values, colors, infoId) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const total = values.reduce((a,b)=>a+b,0) || 1;
+      let start = -Math.PI/2;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      const centerX = canvas.width/2, centerY = canvas.height/2, radius = Math.min(centerX, centerY) - 18;
+      const slices = [];
+      values.forEach((v,i)=>{
+        const slice = (v/total)*Math.PI*2;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, radius, start, start+slice);
+        ctx.closePath();
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fill();
+        slices.push({start, end: start+slice, label: labels[i], value: values[i]||0, color: colors[i % colors.length]});
+        start += slice;
+      });
+      canvas.onclick = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left - centerX;
+        const y = e.clientY - rect.top - centerY;
+        const dist = Math.sqrt(x*x + y*y);
+        if (dist > radius) return;
+        let ang = Math.atan2(y, x);
+        if (ang < -Math.PI/2) ang += Math.PI*2; // align with start angle
+        for (const s of slices) {
+          if (ang >= s.start && ang <= s.end) {
+            const info = document.getElementById(infoId);
+            if (info) info.textContent = `${s.label}: ${s.value.toFixed(2)} $`;
+            break;
+          }
+        }
+      };
+    }
+    const catLabels = Object.keys(chartData.categories || {});
+    const catValues = Object.values(chartData.categories || {});
+    const userLabels = Object.keys(chartData.per_user_spend || {}).map(id => chartData.user_names[id]);
+    const userValues = Object.values(chartData.per_user_spend || {});
+    const palette = ["#60a5fa","#f472b6","#34d399","#fbbf24","#c084fc","#38bdf8","#f97316"];
+    drawPie("cat-chart", catLabels, catValues, palette, "cat-info");
+    drawPie("user-chart", userLabels, userValues, palette, "user-info");
+  </script>
+{% endblock %}
