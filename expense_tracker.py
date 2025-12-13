@@ -107,6 +107,17 @@ class ExpenseTracker:
             CheckConstraint("split_type IN ('percentage','fixed')", name="chk_split_type"),
             CheckConstraint("split_value >= 0", name="chk_split_value"),
         )
+        self.settlements = Table(
+            "settlements",
+            self.metadata,
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("payer_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+            Column("receiver_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+            Column("amount", Float, nullable=False),
+            Column("date", String, nullable=False),
+            Column("note", Text, nullable=False, default=""),
+            CheckConstraint("amount > 0", name="chk_settlement_amount"),
+        )
 
         # Indexes
         Index(
@@ -148,6 +159,47 @@ class ExpenseTracker:
             )
             session.execute(delete(self.shared_expenses).where(self.shared_expenses.c.paid_by_user_id == user_id))
             session.execute(delete(self.users).where(self.users.c.id == user_id))
+            session.commit()
+
+    # --- Settlements (repayments) ---------------------------------------
+    def add_settlement(self, payer_id: int, receiver_id: int, amount: float, date_str: str, note: str = "") -> int:
+        if amount <= 0:
+            raise ValueError("amount must be positive")
+        if payer_id == receiver_id:
+            raise ValueError("Payer and receiver must be different")
+        with self._session() as session:
+            res = session.execute(
+                insert(self.settlements).values(
+                    payer_id=payer_id,
+                    receiver_id=receiver_id,
+                    amount=amount,
+                    date=date_str,
+                    note=note,
+                )
+            )
+            session.commit()
+            return int(res.inserted_primary_key[0])
+
+    def recent_settlements(self, limit: int = 10) -> List[Dict[str, Any]]:
+        stmt = (
+            select(
+                self.settlements.c.id,
+                self.settlements.c.payer_id,
+                self.settlements.c.receiver_id,
+                self.settlements.c.amount,
+                self.settlements.c.date,
+                self.settlements.c.note,
+            )
+            .order_by(self.settlements.c.date.desc(), self.settlements.c.id.desc())
+            .limit(limit)
+        )
+        with self._session() as session:
+            rows = session.execute(stmt).mappings().all()
+            return [dict(r) for r in rows]
+
+    def delete_settlement(self, settlement_id: int) -> None:
+        with self._session() as session:
+            session.execute(delete(self.settlements).where(self.settlements.c.id == settlement_id))
             session.commit()
 
     # --- Personal transactions ------------------------------------------
@@ -525,9 +577,10 @@ class ExpenseTracker:
                 session.execute(select(self.shared_expenses).order_by(self.shared_expenses.c.date)).mappings().all()
             )
             if not expenses:
-                return {"net_by_user": {}, "settlements": []}
+                net: Dict[int, float] = {}
+            else:
+                net = {}
 
-            net: Dict[int, float] = {}
             for expense in expenses:
                 split_rows = (
                     session.execute(
@@ -545,6 +598,25 @@ class ExpenseTracker:
                 net[payer] = net.get(payer, 0.0) + float(expense["total_amount"])
                 for uid, share in shares.items():
                     net[uid] = net.get(uid, 0.0) - share
+
+            # Apply recorded repayments to the balances.
+            settlements_rows = (
+                session.execute(
+                    select(
+                        self.settlements.c.payer_id,
+                        self.settlements.c.receiver_id,
+                        self.settlements.c.amount,
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            for s in settlements_rows:
+                payer = int(s["payer_id"])
+                receiver = int(s["receiver_id"])
+                amt = float(s["amount"])
+                net[payer] = net.get(payer, 0.0) - amt
+                net[receiver] = net.get(receiver, 0.0) + amt
 
         settlements = self._settle(net)
         return {"net_by_user": net, "settlements": [s.__dict__ for s in settlements]}

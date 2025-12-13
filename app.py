@@ -57,6 +57,7 @@ def dashboard():
     users_json = [dict(u) for u in users]
     personal_entries = tracker.recent_personal_transactions()
     shared_entries = tracker.recent_shared_expenses()
+    recent_settlements = tracker.recent_settlements()
     chart_data = {
         "categories": analysis["category_breakdown"],
         "per_user_spend": {uid: data["total_expenses"] for uid, data in analysis["per_user"].items()},
@@ -74,6 +75,7 @@ def dashboard():
         users_json=users_json,
         personal_entries=personal_entries,
         shared_entries=shared_entries,
+        recent_settlements=recent_settlements,
     )
 
 
@@ -292,6 +294,31 @@ def delete_shared(expense_id: int):
 def balances():
     balances = tracker.calculate_shared_balances()
     return render_template("balances.html", balances=balances, user_map=_user_map())
+
+
+@app.route("/settlements", methods=["POST"])
+def add_settlement():
+    try:
+        payer_id = int(request.form["payer_id"])
+        receiver_id = int(request.form["receiver_id"])
+        amount = float(request.form["amount"])
+        note = request.form.get("note", "")
+        settle_date = request.form.get("date") or date.today().isoformat()
+        tracker.add_settlement(payer_id, receiver_id, amount, settle_date, note)
+        flash("Repayment recorded.")
+    except Exception as exc:
+        flash(f"Error recording repayment: {exc}")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/settlements/<int:settlement_id>/delete", methods=["POST"])
+def delete_settlement(settlement_id: int):
+    try:
+        tracker.delete_settlement(settlement_id)
+        flash("Repayment deleted.")
+    except Exception as exc:
+        flash(f"Could not delete repayment: {exc}")
+    return redirect(url_for("dashboard"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

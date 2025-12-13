@@ -65,6 +65,68 @@
     </div>
   </section>
 
+  <section class="panel">
+    <h3>Repayment (還款)</h3>
+    <div class="grid cols-2">
+      <form method="post" action="{{ url_for('add_settlement') }}" class="grid" style="gap:10px;">
+        <div class="grid cols-2">
+          <div>
+            <label>Payer</label>
+            <select name="payer_id" required>
+              {% for u in users %}
+                <option value="{{ u.id }}">{{ u.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label>Receiver</label>
+            <select name="receiver_id" required>
+              {% for u in users %}
+                <option value="{{ u.id }}">{{ u.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div>
+            <label>Amount</label>
+            <input name="amount" type="number" min="0" step="0.01" placeholder="0.00" required>
+          </div>
+          <div>
+            <label>Date</label>
+            <input name="date" type="date" value="{{ today }}" required>
+          </div>
+        </div>
+        <div>
+          <label>Note</label>
+          <input name="note" placeholder="現金/轉帳或備註">
+        </div>
+        <button type="submit">Record repayment</button>
+      </form>
+      <div class="grid" style="gap:10px;">
+        <div class="subtitle">Recent repayments</div>
+        {% for r in recent_settlements %}
+          <div class="panel" style="padding:10px;">
+            <div class="row" style="justify-content:space-between;">
+              <div>
+                <strong>{{ balances.usernames[r.payer_id] }}</strong>
+                ➜
+                <strong>{{ balances.usernames[r.receiver_id] }}</strong>
+              </div>
+              <span class="pill" style="background: rgba(255,178,194,0.35);">{{ "%.2f"|format(r.amount) }} $</span>
+            </div>
+            <div class="subtitle">{{ r.date }}{% if r.note %} · {{ r.note }}{% endif %}</div>
+            <form method="post" action="{{ url_for('delete_settlement', settlement_id=r.id) }}" style="margin-top:6px;">
+              <button type="submit" style="background: rgba(245,158,11,0.9); box-shadow:none;">Delete</button>
+            </form>
+          </div>
+        {% else %}
+          <div class="subtitle">No repayments yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
   <section class="grid cols-2">
     <div class="panel">
       <h3>Personal expense</h3>
