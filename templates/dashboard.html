@@ -307,15 +307,17 @@
     <h3>Visual breakdown</h3>
     <div class="grid cols-2">
       <div>
-        <h4>Spend by category (pie)</h4>
+        <h4>All categories</h4>
         <canvas id="cat-chart" width="320" height="320" style="max-width:100%;height:auto;"></canvas>
         <div class="subtitle" id="cat-info">Tap a slice for details.</div>
       </div>
       <div>
-        <h4>Spend by person (pie)</h4>
+        <h4>Total by person</h4>
         <canvas id="user-chart" width="320" height="320" style="max-width:100%;height:auto;"></canvas>
         <div class="subtitle" id="user-info">Tap a slice for details.</div>
       </div>
+    </div>
+    <div class="grid cols-2" id="per-user-pies" style="margin-top:14px;"></div>
     </div>
     <div class="table-scroll" style="margin-top:12px;">
       <table class="min-wide">
@@ -454,5 +456,25 @@
     const palette = ["#60a5fa","#f472b6","#34d399","#fbbf24","#c084fc","#38bdf8","#f97316"];
     drawPie("cat-chart", catLabels, catValues, palette, "cat-info");
     drawPie("user-chart", userLabels, userValues, palette, "user-info");
+
+    // Per-user pies (e.g., Howard / Vivi)
+    const perUserCats = chartData.per_user_categories || {};
+    const perUserContainer = document.getElementById("per-user-pies");
+    Object.entries(perUserCats).forEach(([uid, cats]) => {
+      const labels = Object.keys(cats || {});
+      const values = Object.values(cats || {});
+      if (!labels.length) return;
+      const canvasId = `per-user-${uid}`;
+      const infoId = `per-user-info-${uid}`;
+      const card = document.createElement("div");
+      card.className = "panel";
+      card.innerHTML = `
+        <h4>${chartData.user_names[uid] || uid}</h4>
+        <canvas id="${canvasId}" width="260" height="260" style="max-width:100%;height:auto;"></canvas>
+        <div class="subtitle" id="${infoId}">Tap a slice for details.</div>
+      `;
+      perUserContainer.appendChild(card);
+      drawPie(canvasId, labels, values, palette, infoId);
+    });
   </script>
 {% endblock %}

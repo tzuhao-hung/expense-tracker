@@ -652,6 +652,7 @@ class ExpenseTracker:
         start, end = month_bounds(year, month)
         users = self.list_users()
         per_user: Dict[int, Dict[str, Any]] = {row["id"]: {"name": row["name"]} for row in users}
+        per_user_categories: Dict[int, Dict[str, float]] = {row["id"]: {} for row in users}
 
         for user in users:
             summary = self.personal_monthly_summary(user["id"], year, month)
@@ -662,6 +663,22 @@ class ExpenseTracker:
                     "shared_share": 0.0,
                 }
             )
+            # Personal expenses by category for this user
+            with self._session() as session:
+                rows = session.execute(
+                    select(
+                        self.personal_transactions.c.category,
+                        func.sum(self.personal_transactions.c.amount).label("total"),
+                    )
+                    .where(self.personal_transactions.c.type == "expense")
+                    .where(self.personal_transactions.c.user_id == user["id"])
+                    .where(self.personal_transactions.c.date.between(start, end))
+                    .group_by(self.personal_transactions.c.category)
+                ).mappings()
+                for row in rows:
+                    per_user_categories[user["id"]][row["category"]] = per_user_categories[user["id"]].get(
+                        row["category"], 0.0
+                    ) + float(row["total"] or 0.0)
 
         with self._session() as session:
             shared = (
@@ -714,11 +731,29 @@ class ExpenseTracker:
                 category_breakdown[expense["category"]] = category_breakdown.get(expense["category"], 0.0) + float(
                     expense["total_amount"]
                 )
+                # Allocate shared category spend per user
+                split_rows = (
+                    session.execute(
+                        select(
+                            self.shared_expense_splits.c.user_id,
+                            self.shared_expense_splits.c.split_type,
+                            self.shared_expense_splits.c.split_value,
+                        ).where(self.shared_expense_splits.c.shared_expense_id == expense["id"])
+                    )
+                    .mappings()
+                    .all()
+                )
+                shares = self._compute_shares_from_splits(expense["total_amount"], split_rows)
+                for uid, share in shares.items():
+                    per_user_categories[uid][expense["category"]] = per_user_categories[uid].get(
+                        expense["category"], 0.0
+                    ) + share
 
         return {
             "per_user": per_user,
             "combined": combined,
             "category_breakdown": category_breakdown,
+            "per_user_categories": per_user_categories,
         }
 
 

@@ -62,6 +62,7 @@ def dashboard():
         "categories": analysis["category_breakdown"],
         "per_user_spend": {uid: data["total_expenses"] for uid, data in analysis["per_user"].items()},
         "user_names": {u["id"]: u["name"] for u in users},
+        "per_user_categories": analysis.get("per_user_categories", {}),
     }
     return render_template(
         "dashboard.html",
