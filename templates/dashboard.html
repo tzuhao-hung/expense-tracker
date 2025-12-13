@@ -6,63 +6,65 @@
     {% endfor %}
   </datalist>
   <section class="panel">
-    <div class="row" style="justify-content: space-between;">
+    <div class="grid cols-2" style="align-items:flex-start;">
       <div>
-        <h1>Monthly Overview</h1>
-        <div class="subtitle">Track each person’s income, personal spend, shared share, and savings.</div>
+        <h1 style="margin-bottom:6px;">Monthly Overview</h1>
+        <div class="subtitle">Track each person’s income, shared spend, and savings.</div>
       </div>
-      <form method="get" class="row">
-        <label for="month">Month</label>
-        <input style="width:100px" id="month" name="month" type="number" min="1" max="12" value="{{ ym.month }}">
-        <label for="year">Year</label>
-        <input style="width:120px" id="year" name="year" type="number" min="2000" value="{{ ym.year }}">
+      <form method="get" class="grid cols-2" style="max-width:320px; margin-left:auto;">
+        <div>
+          <label for="month">Month</label>
+          <input id="month" name="month" type="number" min="1" max="12" value="{{ ym.month }}">
+        </div>
+        <div>
+          <label for="year">Year</label>
+          <input id="year" name="year" type="number" min="2000" value="{{ ym.year }}">
+        </div>
         <button type="submit">Apply</button>
       </form>
     </div>
-    <div class="grid cols-2" style="margin-top:14px;">
-      <div class="panel">
-        <h3>Per person at a glance</h3>
-        <div class="grid cols-2">
-          {% for uid, data in analysis.per_user.items() %}
-            <div class="panel" style="padding:12px;">
-              <strong>{{ data.name }}</strong>
-              <div class="row" style="margin-top:6px;">
-                <span class="pill">Income {{ "%.2f"|format(data.personal_income) }} $</span>
-                <span class="pill">Spend {{ "%.2f"|format(data.total_expenses) }} $</span>
-                <span class="pill">Savings {{ "%.2f"|format(data.savings) }} $</span>
-              </div>
-            </div>
+  </section>
+
+  <section class="grid cols-2">
+    <div class="panel">
+      <h3>Add user</h3>
+      <form action="{{ url_for('create_user') }}" method="post" class="grid" style="gap:10px;">
+        <div>
+          <label>Name</label>
+          <input name="name" placeholder="Name" required>
+        </div>
+        <button type="submit">Save user</button>
+      </form>
+      <div style="margin-top:12px;">
+        <label>People</label>
+        <div class="grid" style="gap:8px;">
+          {% for u in users %}
+            <form method="post" action="{{ url_for('delete_user', user_id=u.id) }}" class="row" style="justify-content:space-between;">
+              <span class="pill" style="flex:1;">{{ u.name }}</span>
+              <button type="submit" style="background: rgba(249,115,22,0.9); box-shadow:none;">Delete</button>
+            </form>
           {% else %}
-            <div class="subtitle">Add a user to get started.</div>
+            <div class="subtitle">No users yet.</div>
           {% endfor %}
         </div>
       </div>
-      <div class="panel">
-        <h3>Quick actions</h3>
-        <div class="row">
-          <a class="pill" href="{{ url_for('add_personal') }}">+ Personal income/expense</a>
-          <a class="pill" href="{{ url_for('add_shared') }}">+ Shared expense</a>
-        </div>
-        <form action="{{ url_for('create_user') }}" method="post" style="margin-top:10px;">
-          <label>Add user</label>
-          <div class="row">
-            <input name="name" placeholder="Name">
-            <button type="submit">Save</button>
+    </div>
+
+    <div class="panel">
+      <h3>Per person at a glance</h3>
+      <div class="grid cols-2">
+        {% for uid, data in analysis.per_user.items() %}
+          <div class="panel" style="padding:12px;">
+            <strong>{{ data.name }}</strong>
+            <div class="grid" style="margin-top:6px; grid-template-columns: 1fr;">
+              <span class="pill">Income {{ "%.2f"|format(data.personal_income) }} $</span>
+              <span class="pill">Spend {{ "%.2f"|format(data.total_expenses) }} $</span>
+              <span class="pill">Savings {{ "%.2f"|format(data.savings) }} $</span>
+            </div>
           </div>
-        </form>
-        <div style="margin-top:12px;">
-          <label>People</label>
-          <div class="row">
-            {% for u in users %}
-              <form method="post" action="{{ url_for('delete_user', user_id=u.id) }}" style="display:flex;align-items:center;gap:6px;">
-                <span class="pill">{{ u.name }}</span>
-                <button type="submit" style="background: rgba(249,115,22,0.9); box-shadow:none;">Delete</button>
-              </form>
-            {% else %}
-              <div class="subtitle">No users yet.</div>
-            {% endfor %}
-          </div>
-        </div>
+        {% else %}
+          <div class="subtitle">Add a user to get started.</div>
+        {% endfor %}
       </div>
     </div>
   </section>
@@ -246,13 +248,13 @@
     <div class="grid cols-2">
       <div>
         <h4>Spend by category (pie)</h4>
-        <canvas id="cat-chart" width="320" height="320"></canvas>
-        <div class="subtitle" id="cat-info">Click a slice to see details.</div>
+        <canvas id="cat-chart" width="320" height="320" style="max-width:100%;height:auto;"></canvas>
+        <div class="subtitle" id="cat-info">Tap a slice for details.</div>
       </div>
       <div>
         <h4>Spend by person (pie)</h4>
-        <canvas id="user-chart" width="320" height="320"></canvas>
-        <div class="subtitle" id="user-info">Click a slice to see details.</div>
+        <canvas id="user-chart" width="320" height="320" style="max-width:100%;height:auto;"></canvas>
+        <div class="subtitle" id="user-info">Tap a slice for details.</div>
       </div>
     </div>
     <div class="table-scroll" style="margin-top:12px;">
