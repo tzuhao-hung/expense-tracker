@@ -2,13 +2,10 @@ services:
   - type: web
     name: expense-tracker
     env: python
-    plan: free
+    plan: free  # free tier has no persistent disk; data resets on redeploy/sleep
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: SECRET_KEY
         sync: false  # set in Render dashboard
       - key: DB_PATH
-        value: /var/data/expenses.db
-    disk:
-      name: expense-tracker-data
-      mountPath: /var/data
+        value: /tmp/expenses.db  # writable but ephemeral on free tier
