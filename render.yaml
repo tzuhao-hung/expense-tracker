@@ -2,10 +2,10 @@ services:
   - type: web
     name: expense-tracker
     env: python
-    plan: free  # free tier has no persistent disk; data resets on redeploy/sleep
+    plan: free
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: SECRET_KEY
         sync: false  # set in Render dashboard
-      - key: DB_PATH
-        value: /tmp/expenses.db  # writable but ephemeral on free tier
+      - key: DATABASE_URL
+        sync: false  # set to Neon/Supabase Postgres URL

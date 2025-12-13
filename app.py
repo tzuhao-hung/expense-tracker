@@ -9,8 +9,11 @@ from expense_tracker import DEFAULT_CATEGORIES, ExpenseTracker
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev")  # Set SECRET_KEY in production.
-db_path = os.environ.get("DB_PATH", "expenses.db")
-tracker = ExpenseTracker(db_path)
+db_url = os.environ.get("DATABASE_URL")
+if not db_url:
+    db_path = os.environ.get("DB_PATH", "expenses.db")
+    db_url = f"sqlite:///{db_path}"
+tracker = ExpenseTracker(db_url)
 
 
 def _current_year_month() -> Dict[str, int]:
@@ -38,13 +41,10 @@ def _get_or_create_user(name: str) -> int:
     clean = name.strip()
     if not clean:
         raise ValueError("Name is required")
-    # Case-insensitive match to avoid duplicate users created via typed names.
-    cur = tracker.conn.execute("SELECT id, name FROM users WHERE name = ? COLLATE NOCASE", (clean,))
-    row = cur.fetchone()
-    if row:
-        return int(row["id"])
-    new_id = tracker.add_user(clean)
-    return new_id
+    existing = tracker.find_user_by_name(clean)
+    if existing:
+        return int(existing["id"])
+    return tracker.add_user(clean)
 
 
 @app.route("/")
@@ -55,24 +55,8 @@ def dashboard():
     balances["usernames"] = _user_map()
     users = tracker.list_users()
     users_json = [dict(u) for u in users]
-    personal_entries = tracker.conn.execute(
-        """
-        SELECT pt.id, u.name AS user_name, pt.type, pt.amount, pt.category, pt.date, pt.note
-        FROM personal_transactions pt
-        JOIN users u ON pt.user_id = u.id
-        ORDER BY pt.date DESC, pt.id DESC
-        LIMIT 20
-        """
-    ).fetchall()
-    shared_entries = tracker.conn.execute(
-        """
-        SELECT se.id, se.title, se.total_amount, se.date, se.category, se.note, u.name AS paid_by
-        FROM shared_expenses se
-        JOIN users u ON se.paid_by_user_id = u.id
-        ORDER BY se.date DESC, se.id DESC
-        LIMIT 20
-        """
-    ).fetchall()
+    personal_entries = tracker.recent_personal_transactions()
+    shared_entries = tracker.recent_shared_expenses()
     chart_data = {
         "categories": analysis["category_breakdown"],
         "per_user_spend": {uid: data["total_expenses"] for uid, data in analysis["per_user"].items()},
@@ -110,11 +94,7 @@ def create_user():
 @app.route("/users/<int:user_id>/delete", methods=["POST"])
 def delete_user(user_id: int):
     try:
-        # Force-delete: remove splits they are part of, remove expenses they paid, then the user.
-        tracker.conn.execute("DELETE FROM shared_expense_splits WHERE user_id = ?", (user_id,))
-        tracker.conn.execute("DELETE FROM shared_expenses WHERE paid_by_user_id = ?", (user_id,))
-        tracker.conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        tracker.conn.commit()
+        tracker.delete_user(user_id)
         flash("User and related shared expenses deleted.")
     except Exception as exc:
         flash(f"Could not delete user: {exc}")
@@ -154,32 +134,22 @@ def add_personal():
 @app.route("/personal/<int:tx_id>/edit", methods=["GET", "POST"])
 def edit_personal(tx_id: int):
     users = tracker.list_users()
-    tx = tracker.conn.execute(
-        "SELECT * FROM personal_transactions WHERE id = ?", (tx_id,)
-    ).fetchone()
+    tx = tracker.get_personal_transaction(tx_id)
     if not tx:
         flash("Personal transaction not found.")
         return redirect(url_for("dashboard"))
     if request.method == "POST":
         try:
             user_id = int(request.form["user_id"])
-            tracker.conn.execute(
-                """
-                UPDATE personal_transactions
-                SET user_id=?, type=?, amount=?, category=?, note=?, date=?
-                WHERE id=?
-                """,
-                (
-                    user_id,
-                    request.form["type"],
-                    float(request.form["amount"]),
-                    request.form["category"],
-                    request.form.get("note", ""),
-                    request.form["date"],
-                    tx_id,
-                ),
+            tracker.update_personal_transaction(
+                tx_id=tx_id,
+                user_id=user_id,
+                tx_type=request.form["type"],
+                amount=float(request.form["amount"]),
+                category=request.form["category"],
+                note=request.form.get("note", ""),
+                tx_date=request.form["date"],
             )
-            tracker.conn.commit()
             flash("Personal transaction updated.")
             return redirect(url_for("dashboard"))
         except Exception as exc:
@@ -196,8 +166,7 @@ def edit_personal(tx_id: int):
 @app.route("/personal/<int:tx_id>/delete", methods=["POST"])
 def delete_personal(tx_id: int):
     try:
-        tracker.conn.execute("DELETE FROM personal_transactions WHERE id = ?", (tx_id,))
-        tracker.conn.commit()
+        tracker.delete_personal_transaction(tx_id)
         flash("Personal transaction deleted.")
     except Exception as exc:
         flash(f"Could not delete: {exc}")
@@ -263,14 +232,11 @@ def add_shared():
 @app.route("/shared/<int:expense_id>/edit", methods=["GET", "POST"])
 def edit_shared(expense_id: int):
     users = tracker.list_users()
-    expense = tracker.conn.execute("SELECT * FROM shared_expenses WHERE id = ?", (expense_id,)).fetchone()
+    expense = tracker.get_shared_expense(expense_id)
     if not expense:
         flash("Shared expense not found.")
         return redirect(url_for("dashboard"))
-    splits = tracker.conn.execute(
-        "SELECT user_id, split_type, split_value FROM shared_expense_splits WHERE shared_expense_id = ?",
-        (expense_id,),
-    ).fetchall()
+    splits = tracker.get_shared_splits(expense_id)
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         total = request.form.get("total_amount", "0")
@@ -288,29 +254,16 @@ def edit_shared(expense_id: int):
             new_splits.append({"user_id": int(uid), "split_type": stype, "value": float(val or 0)})
         try:
             payer_id = int(paid_by)
-            if not any(s["user_id"] == payer_id for s in new_splits):
-                new_splits.append({"user_id": payer_id, "split_type": "percentage", "value": 0})
-            tracker.conn.execute(
-                """
-                UPDATE shared_expenses
-                SET title=?, total_amount=?, date=?, paid_by_user_id=?, category=?, note=?
-                WHERE id=?
-                """,
-                (title, float(total), expense_date, payer_id, category, note, expense_id),
+            tracker.update_shared_expense(
+                expense_id=expense_id,
+                title=title,
+                total_amount=float(total),
+                expense_date=expense_date,
+                paid_by_user_id=payer_id,
+                category=category,
+                note=note,
+                splits=new_splits,
             )
-            tracker.conn.execute(
-                "DELETE FROM shared_expense_splits WHERE shared_expense_id = ?",
-                (expense_id,),
-            )
-            for s in new_splits:
-                tracker.conn.execute(
-                    """
-                    INSERT INTO shared_expense_splits(shared_expense_id, user_id, split_type, split_value)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (expense_id, s["user_id"], s["split_type"], s["value"]),
-                )
-            tracker.conn.commit()
             flash("Shared expense updated.")
             return redirect(url_for("dashboard"))
         except Exception as exc:
@@ -328,9 +281,7 @@ def edit_shared(expense_id: int):
 @app.route("/shared/<int:expense_id>/delete", methods=["POST"])
 def delete_shared(expense_id: int):
     try:
-        tracker.conn.execute("DELETE FROM shared_expense_splits WHERE shared_expense_id = ?", (expense_id,))
-        tracker.conn.execute("DELETE FROM shared_expenses WHERE id = ?", (expense_id,))
-        tracker.conn.commit()
+        tracker.delete_shared_expense(expense_id)
         flash("Shared expense deleted.")
     except Exception as exc:
         flash(f"Could not delete shared expense: {exc}")

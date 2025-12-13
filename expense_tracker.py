@@ -1,21 +1,38 @@
 """
 Expense tracking backend with personal and shared (Splitwise-like) logic.
 
-Core features implemented here:
-- Personal income/expense recording with monthly summaries.
-- Shared expenses with percentage or fixed splits.
-- Balance calculation showing who owes whom.
-- Monthly analysis combining personal and shared spending.
+Now uses SQLAlchemy so it can run on SQLite locally or Postgres in the cloud.
 """
 
 from __future__ import annotations
 
 import calendar
-import os
-import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Text,
+    case,
+    create_engine,
+    delete,
+    func,
+    insert,
+    select,
+    update,
+)
+from sqlalchemy.engine import Engine, Result
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 
 DEFAULT_CATEGORIES = [
@@ -37,77 +54,119 @@ class Settlement:
 
 
 class ExpenseTracker:
-    def __init__(self, db_path: str = "expenses.db") -> None:
-        # check_same_thread=False allows use across Flask threads; for production,
-        # prefer scoped connections per request.
-        db_dir = os.path.dirname(db_path)
-        if db_dir and not os.path.exists(db_dir):
-            os.makedirs(db_dir, exist_ok=True)
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self._init_db()
+    def __init__(self, db_url: str = "sqlite:///expenses.db") -> None:
+        self.engine: Engine = create_engine(db_url, future=True, echo=False)
+        self.metadata = MetaData()
 
-    def _init_db(self) -> None:
-        """Create tables if they do not already exist."""
-        self.conn.executescript(
-            """
-            PRAGMA foreign_keys = ON;
+        # Table definitions
+        self.users = self._define_users()
+        self.personal_transactions = self._define_personal_transactions()
+        self.shared_expenses = self._define_shared_expenses()
+        self.shared_expense_splits = self._define_shared_expense_splits()
 
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE
-            );
-
-            CREATE TABLE IF NOT EXISTS personal_transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
-                amount REAL NOT NULL CHECK (amount > 0),
-                category TEXT NOT NULL,
-                note TEXT DEFAULT '',
-                date TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS shared_expenses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                total_amount REAL NOT NULL CHECK (total_amount > 0),
-                date TEXT NOT NULL,
-                paid_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-                category TEXT NOT NULL DEFAULT 'others',
-                note TEXT DEFAULT ''
-            );
-
-            CREATE TABLE IF NOT EXISTS shared_expense_splits (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                shared_expense_id INTEGER NOT NULL REFERENCES shared_expenses(id) ON DELETE CASCADE,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                split_type TEXT NOT NULL CHECK (split_type IN ('percentage', 'fixed')),
-                split_value REAL NOT NULL CHECK (split_value >= 0)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_personal_transactions_user_date
-                ON personal_transactions(user_id, date);
-
-            CREATE INDEX IF NOT EXISTS idx_shared_expenses_date
-                ON shared_expenses(date);
-            """
+        # Indexes
+        Index(
+            "idx_personal_transactions_user_date",
+            self.personal_transactions.c.user_id,
+            self.personal_transactions.c.date,
         )
-        self.conn.commit()
+        Index("idx_shared_expenses_date", self.shared_expenses.c.date)
+
+        self.metadata.create_all(self.engine)
+
+    def _define_users(self):
+        return self._table(
+            "users",
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("name", String, nullable=False, unique=True),
+        )
+
+    def _define_personal_transactions(self):
+        return self._table(
+            "personal_transactions",
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+            Column("type", String, nullable=False),
+            Column("amount", Float, nullable=False),
+            Column("category", String, nullable=False),
+            Column("note", Text, nullable=False, default=""),
+            Column("date", String, nullable=False),
+            CheckConstraint("type IN ('income','expense')", name="chk_pt_type"),
+            CheckConstraint("amount > 0", name="chk_pt_amount"),
+        )
+
+    def _define_shared_expenses(self):
+        return self._table(
+            "shared_expenses",
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column("title", String, nullable=False),
+            Column("total_amount", Float, nullable=False),
+            Column("date", String, nullable=False),
+            Column("paid_by_user_id", Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+            Column("category", String, nullable=False, default="others"),
+            Column("note", Text, nullable=False, default=""),
+            CheckConstraint("total_amount > 0", name="chk_se_total"),
+        )
+
+    def _define_shared_expense_splits(self):
+        return self._table(
+            "shared_expense_splits",
+            Column("id", Integer, primary_key=True, autoincrement=True),
+            Column(
+                "shared_expense_id",
+                Integer,
+                ForeignKey("shared_expenses.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            Column("user_id", Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+            Column("split_type", String, nullable=False),
+            Column("split_value", Float, nullable=False),
+            CheckConstraint("split_type IN ('percentage','fixed')", name="chk_split_type"),
+            CheckConstraint("split_value >= 0", name="chk_split_value"),
+        )
+
+    def _table(self, name: str, *cols: Any):
+        return self.metadata.tables.get(name) or self._create_table(name, *cols)
+
+    def _create_table(self, name: str, *cols: Any):
+        return self.metadata.tables.setdefault(name, self.metadata.tables.get(name) or self._make_table(name, *cols))
+
+    def _make_table(self, name: str, *cols: Any):
+        from sqlalchemy import Table
+
+        return Table(name, self.metadata, *cols)
+
+    @contextmanager
+    def _session(self) -> Iterable[Session]:
+        with Session(self.engine) as session:
+            yield session
 
     # --- User management -------------------------------------------------
     def add_user(self, name: str) -> int:
-        """Insert a new user; returns the user id."""
-        cur = self.conn.execute(
-            "INSERT INTO users(name) VALUES (?)",
-            (name.strip(),),
-        )
-        self.conn.commit()
-        return int(cur.lastrowid)
+        with self._session() as session:
+            res = session.execute(insert(self.users).values(name=name.strip()))
+            session.commit()
+            return int(res.inserted_primary_key[0])
 
-    def list_users(self) -> List[sqlite3.Row]:
-        cur = self.conn.execute("SELECT id, name FROM users ORDER BY name")
-        return list(cur.fetchall())
+    def find_user_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        with self._session() as session:
+            stmt = select(self.users).where(func.lower(self.users.c.name) == func.lower(name.strip()))
+            row = session.execute(stmt).mappings().first()
+            return dict(row) if row else None
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        with self._session() as session:
+            res = session.execute(select(self.users).order_by(self.users.c.name)).mappings().all()
+            return [dict(row) for row in res]
+
+    def delete_user(self, user_id: int) -> None:
+        with self._session() as session:
+            session.execute(
+                delete(self.shared_expense_splits).where(self.shared_expense_splits.c.user_id == user_id)
+            )
+            session.execute(delete(self.shared_expenses).where(self.shared_expenses.c.paid_by_user_id == user_id))
+            session.execute(delete(self.users).where(self.users.c.id == user_id))
+            session.commit()
 
     # --- Personal transactions ------------------------------------------
     def add_personal_transaction(
@@ -123,50 +182,111 @@ class ExpenseTracker:
             raise ValueError("tx_type must be 'income' or 'expense'")
         if amount <= 0:
             raise ValueError("amount must be positive")
-        cur = self.conn.execute(
-            """
-            INSERT INTO personal_transactions(user_id, type, amount, category, note, date)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, tx_type, amount, category, note, tx_date),
-        )
-        self.conn.commit()
-        return int(cur.lastrowid)
+        with self._session() as session:
+            res = session.execute(
+                insert(self.personal_transactions).values(
+                    user_id=user_id,
+                    type=tx_type,
+                    amount=amount,
+                    category=category,
+                    note=note,
+                    date=tx_date,
+                )
+            )
+            session.commit()
+            return int(res.inserted_primary_key[0])
 
     def get_personal_transactions(
         self,
         user_id: int,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-    ) -> List[sqlite3.Row]:
-        sql = "SELECT * FROM personal_transactions WHERE user_id = ?"
-        params: List[object] = [user_id]
+    ) -> List[Dict[str, Any]]:
+        stmt = select(self.personal_transactions).where(self.personal_transactions.c.user_id == user_id)
         if start_date:
-            sql += " AND date >= ?"
-            params.append(start_date)
+            stmt = stmt.where(self.personal_transactions.c.date >= start_date)
         if end_date:
-            sql += " AND date <= ?"
-            params.append(end_date)
-        sql += " ORDER BY date DESC, id DESC"
-        cur = self.conn.execute(sql, params)
-        return list(cur.fetchall())
+            stmt = stmt.where(self.personal_transactions.c.date <= end_date)
+        stmt = stmt.order_by(self.personal_transactions.c.date.desc(), self.personal_transactions.c.id.desc())
+        with self._session() as session:
+            res = session.execute(stmt).mappings().all()
+            return [dict(row) for row in res]
+
+    def get_personal_transaction(self, tx_id: int) -> Optional[Dict[str, Any]]:
+        with self._session() as session:
+            row = session.execute(
+                select(self.personal_transactions).where(self.personal_transactions.c.id == tx_id)
+            ).mappings().first()
+            return dict(row) if row else None
+
+    def update_personal_transaction(
+        self,
+        tx_id: int,
+        user_id: int,
+        tx_type: str,
+        amount: float,
+        category: str,
+        note: str,
+        tx_date: str,
+    ) -> None:
+        with self._session() as session:
+            session.execute(
+                update(self.personal_transactions)
+                .where(self.personal_transactions.c.id == tx_id)
+                .values(
+                    user_id=user_id,
+                    type=tx_type,
+                    amount=amount,
+                    category=category,
+                    note=note,
+                    date=tx_date,
+                )
+            )
+            session.commit()
+
+    def delete_personal_transaction(self, tx_id: int) -> None:
+        with self._session() as session:
+            session.execute(delete(self.personal_transactions).where(self.personal_transactions.c.id == tx_id))
+            session.commit()
 
     def personal_monthly_summary(self, user_id: int, year: int, month: int) -> Dict[str, float]:
         start, end = month_bounds(year, month)
-        cur = self.conn.execute(
-            """
-            SELECT
-                SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) AS income,
-                SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) AS expenses
-            FROM personal_transactions
-            WHERE user_id = ? AND date BETWEEN ? AND ?
-            """,
-            (user_id, start, end),
+        income_case = case((self.personal_transactions.c.type == "income", self.personal_transactions.c.amount), else_=0)
+        expense_case = case(
+            (self.personal_transactions.c.type == "expense", self.personal_transactions.c.amount), else_=0
         )
-        row = cur.fetchone()
-        income = row["income"] or 0.0
-        expenses = row["expenses"] or 0.0
-        return {"income": income, "expenses": expenses, "savings": income - expenses}
+        stmt = (
+            select(
+                func.coalesce(func.sum(income_case), 0).label("income"),
+                func.coalesce(func.sum(expense_case), 0).label("expenses"),
+            )
+            .where(self.personal_transactions.c.user_id == user_id)
+            .where(self.personal_transactions.c.date.between(start, end))
+        )
+        with self._session() as session:
+            row = session.execute(stmt).mappings().first()
+            income = float(row["income"])
+            expenses = float(row["expenses"])
+            return {"income": income, "expenses": expenses, "savings": income - expenses}
+
+    def recent_personal_transactions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        stmt = (
+            select(
+                self.personal_transactions.c.id,
+                self.users.c.name.label("user_name"),
+                self.personal_transactions.c.type,
+                self.personal_transactions.c.amount,
+                self.personal_transactions.c.category,
+                self.personal_transactions.c.date,
+                self.personal_transactions.c.note,
+            )
+            .join(self.users, self.users.c.id == self.personal_transactions.c.user_id)
+            .order_by(self.personal_transactions.c.date.desc(), self.personal_transactions.c.id.desc())
+            .limit(limit)
+        )
+        with self._session() as session:
+            res = session.execute(stmt).mappings().all()
+            return [dict(row) for row in res]
 
     # --- Shared expenses -------------------------------------------------
     def add_shared_expense(
@@ -179,19 +299,10 @@ class ExpenseTracker:
         category: str = "others",
         note: str = "",
     ) -> int:
-        """
-        Add a shared expense.
-
-        splits: iterable of dicts with keys:
-            - user_id: int
-            - split_type: 'percentage' or 'fixed'
-            - value: numeric percentage or fixed amount
-        """
         if total_amount <= 0:
             raise ValueError("total_amount must be positive")
 
-        # Normalize splits and pre-validate.
-        normalized_splits = []
+        normalized_splits: List[Dict[str, Any]] = []
         payer_seen = False
         for split in splits:
             user_id = int(split["user_id"])
@@ -210,39 +321,37 @@ class ExpenseTracker:
         if not payer_seen:
             raise ValueError("Payer must be included in splits")
 
-        shares = self._compute_shares_from_splits(total_amount, normalized_splits)
+        self._compute_shares_from_splits(total_amount, normalized_splits)
 
-        cur = self.conn.execute(
-            """
-            INSERT INTO shared_expenses(title, total_amount, date, paid_by_user_id, category, note)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (title, total_amount, expense_date, paid_by_user_id, category, note),
-        )
-        expense_id = int(cur.lastrowid)
-
-        for split in normalized_splits:
-            self.conn.execute(
-                """
-                INSERT INTO shared_expense_splits(shared_expense_id, user_id, split_type, split_value)
-                VALUES (?, ?, ?, ?)
-                """,
-                (expense_id, split["user_id"], split["split_type"], split["value"]),
+        with self._session() as session:
+            res = session.execute(
+                insert(self.shared_expenses).values(
+                    title=title,
+                    total_amount=total_amount,
+                    date=expense_date,
+                    paid_by_user_id=paid_by_user_id,
+                    category=category,
+                    note=note,
+                )
             )
+            expense_id = int(res.inserted_primary_key[0])
 
-        self.conn.commit()
-        return expense_id
+            for split in normalized_splits:
+                session.execute(
+                    insert(self.shared_expense_splits).values(
+                        shared_expense_id=expense_id,
+                        user_id=split["user_id"],
+                        split_type=split["split_type"],
+                        split_value=split["value"],
+                    )
+                )
+            session.commit()
+            return expense_id
 
     def _compute_shares_from_splits(
         self, total_amount: float, splits: Iterable[Dict[str, object]]
     ) -> Dict[int, float]:
-        """
-        Convert stored splits to actual monetary shares.
-        Auto-normalizes percentage splits to fill the remaining amount (helps if a participant was removed).
-        """
-
         def _split_value(split: object) -> float:
-            # Support both incoming dicts (from forms) and sqlite3.Row objects (from DB).
             try:
                 if isinstance(split, dict):
                     if "value" in split:
@@ -270,7 +379,6 @@ class ExpenseTracker:
             raise ValueError("Fixed splits exceed the total amount")
 
         shares: Dict[int, float] = {}
-        # Apply fixed shares first.
         for split in splits:
             if split["split_type"] == "fixed":
                 uid = int(split["user_id"])
@@ -281,7 +389,6 @@ class ExpenseTracker:
         if remaining < -1e-6:
             raise ValueError("Allocated exceeds total amount")
 
-        # Allocate remaining by percentage (scaled) or equally if no percentages.
         if remaining > 1e-6:
             if percent_total > 0:
                 for split in splits:
@@ -299,14 +406,25 @@ class ExpenseTracker:
         return shares
 
     def shared_expense_detail(self, expense_id: int) -> Dict[str, object]:
-        cur = self.conn.execute("SELECT * FROM shared_expenses WHERE id = ?", (expense_id,))
-        expense = cur.fetchone()
-        if not expense:
-            raise ValueError("Shared expense not found")
-        split_rows = self.conn.execute(
-            "SELECT user_id, split_type, split_value FROM shared_expense_splits WHERE shared_expense_id = ?",
-            (expense_id,),
-        ).fetchall()
+        with self._session() as session:
+            expense = (
+                session.execute(select(self.shared_expenses).where(self.shared_expenses.c.id == expense_id))
+                .mappings()
+                .first()
+            )
+            if not expense:
+                raise ValueError("Shared expense not found")
+            split_rows = (
+                session.execute(
+                    select(
+                        self.shared_expense_splits.c.user_id,
+                        self.shared_expense_splits.c.split_type,
+                        self.shared_expense_splits.c.split_value,
+                    ).where(self.shared_expense_splits.c.shared_expense_id == expense_id)
+                )
+                .mappings()
+                .all()
+            )
         shares = self._compute_shares_from_splits(expense["total_amount"], split_rows)
         return {
             "expense": dict(expense),
@@ -314,47 +432,145 @@ class ExpenseTracker:
             "shares": shares,
         }
 
+    def get_shared_expense(self, expense_id: int) -> Optional[Dict[str, Any]]:
+        with self._session() as session:
+            row = session.execute(
+                select(self.shared_expenses).where(self.shared_expenses.c.id == expense_id)
+            ).mappings().first()
+            return dict(row) if row else None
+
+    def get_shared_splits(self, expense_id: int) -> List[Dict[str, Any]]:
+        with self._session() as session:
+            res = session.execute(
+                select(
+                    self.shared_expense_splits.c.user_id,
+                    self.shared_expense_splits.c.split_type,
+                    self.shared_expense_splits.c.split_value,
+                ).where(self.shared_expense_splits.c.shared_expense_id == expense_id)
+            ).mappings()
+            return [dict(row) for row in res.all()]
+
+    def update_shared_expense(
+        self,
+        expense_id: int,
+        title: str,
+        total_amount: float,
+        expense_date: str,
+        paid_by_user_id: int,
+        category: str,
+        note: str,
+        splits: Iterable[Dict[str, object]],
+    ) -> None:
+        normalized_splits: List[Dict[str, Any]] = []
+        payer_seen = False
+        for split in splits:
+            uid = int(split["user_id"])
+            stype = str(split["split_type"])
+            val = float(split["value"])
+            if stype not in {"percentage", "fixed"}:
+                raise ValueError("split_type must be 'percentage' or 'fixed'")
+            if val < 0:
+                raise ValueError("split_value cannot be negative")
+            if uid == paid_by_user_id:
+                payer_seen = True
+            normalized_splits.append({"user_id": uid, "split_type": stype, "value": val})
+        if not normalized_splits:
+            raise ValueError("At least one participant is required")
+        if not payer_seen:
+            normalized_splits.append({"user_id": paid_by_user_id, "split_type": "percentage", "value": 0})
+
+        self._compute_shares_from_splits(total_amount, normalized_splits)
+
+        with self._session() as session:
+            session.execute(
+                update(self.shared_expenses)
+                .where(self.shared_expenses.c.id == expense_id)
+                .values(
+                    title=title,
+                    total_amount=total_amount,
+                    date=expense_date,
+                    paid_by_user_id=paid_by_user_id,
+                    category=category,
+                    note=note,
+                )
+            )
+            session.execute(
+                delete(self.shared_expense_splits).where(
+                    self.shared_expense_splits.c.shared_expense_id == expense_id
+                )
+            )
+            for split in normalized_splits:
+                session.execute(
+                    insert(self.shared_expense_splits).values(
+                        shared_expense_id=expense_id,
+                        user_id=split["user_id"],
+                        split_type=split["split_type"],
+                        split_value=split["value"],
+                    )
+                )
+            session.commit()
+
+    def delete_shared_expense(self, expense_id: int) -> None:
+        with self._session() as session:
+            session.execute(
+                delete(self.shared_expense_splits).where(self.shared_expense_splits.c.shared_expense_id == expense_id)
+            )
+            session.execute(delete(self.shared_expenses).where(self.shared_expenses.c.id == expense_id))
+            session.commit()
+
+    def recent_shared_expenses(self, limit: int = 20) -> List[Dict[str, Any]]:
+        stmt = (
+            select(
+                self.shared_expenses.c.id,
+                self.shared_expenses.c.title,
+                self.shared_expenses.c.total_amount,
+                self.shared_expenses.c.date,
+                self.shared_expenses.c.category,
+                self.shared_expenses.c.note,
+                self.users.c.name.label("paid_by"),
+            )
+            .join(self.users, self.users.c.id == self.shared_expenses.c.paid_by_user_id)
+            .order_by(self.shared_expenses.c.date.desc(), self.shared_expenses.c.id.desc())
+            .limit(limit)
+        )
+        with self._session() as session:
+            res = session.execute(stmt).mappings().all()
+            return [dict(row) for row in res]
+
     def calculate_shared_balances(self) -> Dict[str, object]:
-        """
-        Return overall balances for all shared expenses.
-        net_by_user: positive means the user should receive money.
-        settlements: simplified payer -> receiver transfers to clear balances.
-        """
-        expenses = self.conn.execute("SELECT * FROM shared_expenses ORDER BY date").fetchall()
-        if not expenses:
-            return {"net_by_user": {}, "settlements": []}
+        with self._session() as session:
+            expenses = (
+                session.execute(select(self.shared_expenses).order_by(self.shared_expenses.c.date)).mappings().all()
+            )
+            if not expenses:
+                return {"net_by_user": {}, "settlements": []}
 
-        net: Dict[int, float] = {}
-        for expense in expenses:
-            split_rows = self.conn.execute(
-                """
-                SELECT user_id, split_type, split_value
-                FROM shared_expense_splits
-                WHERE shared_expense_id = ?
-                """,
-                (expense["id"],),
-            ).fetchall()
-            shares = self._compute_shares_from_splits(expense["total_amount"], split_rows)
-            payer = int(expense["paid_by_user_id"])
-
-            # Paid amount increases payer's balance; each share decreases participant balance.
-            net[payer] = net.get(payer, 0.0) + float(expense["total_amount"])
-            for uid, share in shares.items():
-                net[uid] = net.get(uid, 0.0) - share
+            net: Dict[int, float] = {}
+            for expense in expenses:
+                split_rows = (
+                    session.execute(
+                        select(
+                            self.shared_expense_splits.c.user_id,
+                            self.shared_expense_splits.c.split_type,
+                            self.shared_expense_splits.c.split_value,
+                        ).where(self.shared_expense_splits.c.shared_expense_id == expense["id"])
+                    )
+                    .mappings()
+                    .all()
+                )
+                shares = self._compute_shares_from_splits(expense["total_amount"], split_rows)
+                payer = int(expense["paid_by_user_id"])
+                net[payer] = net.get(payer, 0.0) + float(expense["total_amount"])
+                for uid, share in shares.items():
+                    net[uid] = net.get(uid, 0.0) - share
 
         settlements = self._settle(net)
         return {"net_by_user": net, "settlements": [s.__dict__ for s in settlements]}
 
     def _settle(self, net_by_user: Dict[int, float]) -> List[Settlement]:
-        """Generate transfers to resolve balances (greedy creditor/debtor matching)."""
-        creditors: List[Tuple[int, float]] = [
-            (uid, bal) for uid, bal in net_by_user.items() if bal > 0.009
-        ]
-        debtors: List[Tuple[int, float]] = [
-            (uid, -bal) for uid, bal in net_by_user.items() if bal < -0.009
-        ]
+        creditors: List[Tuple[int, float]] = [(uid, bal) for uid, bal in net_by_user.items() if bal > 0.009]
+        debtors: List[Tuple[int, float]] = [(uid, -bal) for uid, bal in net_by_user.items() if bal < -0.009]
 
-        # Largest-first makes results predictable and keeps transfer count small.
         creditors.sort(key=lambda x: x[1], reverse=True)
         debtors.sort(key=lambda x: x[1], reverse=True)
 
@@ -379,17 +595,10 @@ class ExpenseTracker:
 
     # --- Monthly analysis -----------------------------------------------
     def monthly_analysis(self, year: int, month: int) -> Dict[str, object]:
-        """
-        Combined monthly view for all users:
-        - per user income/expenses/savings (personal + shared shares)
-        - combined totals
-        - spending by category
-        """
         start, end = month_bounds(year, month)
         users = self.list_users()
-        per_user = {row["id"]: {"name": row["name"]} for row in users}
+        per_user: Dict[int, Dict[str, Any]] = {row["id"]: {"name": row["name"]} for row in users}
 
-        # Personal income/expenses
         for user in users:
             summary = self.personal_monthly_summary(user["id"], year, month)
             per_user[user["id"]].update(
@@ -400,59 +609,57 @@ class ExpenseTracker:
                 }
             )
 
-        # Shared expense shares during the month
-        shared = self.conn.execute(
-            "SELECT * FROM shared_expenses WHERE date BETWEEN ? AND ?",
-            (start, end),
-        ).fetchall()
-
-        for expense in shared:
-            split_rows = self.conn.execute(
-                """
-                SELECT user_id, split_type, split_value
-                FROM shared_expense_splits
-                WHERE shared_expense_id = ?
-                """,
-                (expense["id"],),
-            ).fetchall()
-            shares = self._compute_shares_from_splits(expense["total_amount"], split_rows)
-            for uid, share in shares.items():
-                per_user[uid]["shared_share"] = per_user[uid].get("shared_share", 0.0) + share
-
-        # Finalize totals and savings per user.
-        for uid, data in per_user.items():
-            total_expenses = data["personal_expenses"] + data["shared_share"]
-            data["total_expenses"] = total_expenses
-            data["savings"] = data["personal_income"] - total_expenses
-
-        # Combined totals
-        combined_income = sum(d["personal_income"] for d in per_user.values())
-        combined_expenses = sum(d["total_expenses"] for d in per_user.values())
-        combined = {
-            "income": combined_income,
-            "expenses": combined_expenses,
-            "savings": combined_income - combined_expenses,
-        }
-
-        # Category breakdown from personal expenses + shared expense categories.
-        category_breakdown: Dict[str, float] = {}
-        personal_rows = self.conn.execute(
-            """
-            SELECT category, SUM(amount) AS total
-            FROM personal_transactions
-            WHERE type = 'expense' AND date BETWEEN ? AND ?
-            GROUP BY category
-            """,
-            (start, end),
-        ).fetchall()
-        for row in personal_rows:
-            category_breakdown[row["category"]] = category_breakdown.get(row["category"], 0.0) + (
-                row["total"] or 0.0
+        with self._session() as session:
+            shared = (
+                session.execute(
+                    select(self.shared_expenses).where(self.shared_expenses.c.date.between(start, end))
+                ).mappings().all()
             )
-        for expense in shared:
-            category_breakdown[expense["category"]] = category_breakdown.get(expense["category"], 0.0) + float(
-                expense["total_amount"]
-            )
+
+            for expense in shared:
+                split_rows = (
+                    session.execute(
+                        select(
+                            self.shared_expense_splits.c.user_id,
+                            self.shared_expense_splits.c.split_type,
+                            self.shared_expense_splits.c.split_value,
+                        ).where(self.shared_expense_splits.c.shared_expense_id == expense["id"])
+                    )
+                    .mappings()
+                    .all()
+                )
+                shares = self._compute_shares_from_splits(expense["total_amount"], split_rows)
+                for uid, share in shares.items():
+                    per_user[uid]["shared_share"] = per_user[uid].get("shared_share", 0.0) + share
+
+            for uid, data in per_user.items():
+                total_expenses = data["personal_expenses"] + data["shared_share"]
+                data["total_expenses"] = total_expenses
+                data["savings"] = data["personal_income"] - total_expenses
+
+            combined_income = sum(d["personal_income"] for d in per_user.values())
+            combined_expenses = sum(d["total_expenses"] for d in per_user.values())
+            combined = {
+                "income": combined_income,
+                "expenses": combined_expenses,
+                "savings": combined_income - combined_expenses,
+            }
+
+            category_breakdown: Dict[str, float] = {}
+            personal_rows = session.execute(
+                select(self.personal_transactions.c.category, func.sum(self.personal_transactions.c.amount).label("total"))
+                .where(self.personal_transactions.c.type == "expense")
+                .where(self.personal_transactions.c.date.between(start, end))
+                .group_by(self.personal_transactions.c.category)
+            ).mappings().all()
+            for row in personal_rows:
+                category_breakdown[row["category"]] = category_breakdown.get(row["category"], 0.0) + float(
+                    row["total"] or 0.0
+                )
+            for expense in shared:
+                category_breakdown[expense["category"]] = category_breakdown.get(expense["category"], 0.0) + float(
+                    expense["total_amount"]
+                )
 
         return {
             "per_user": per_user,
@@ -470,7 +677,6 @@ def month_bounds(year: int, month: int) -> Tuple[str, str]:
 
 
 if __name__ == "__main__":
-    # Minimal example usage.
     tracker = ExpenseTracker()
     if not tracker.list_users():
         alice = tracker.add_user("Alice")
@@ -480,10 +686,7 @@ if __name__ == "__main__":
         users = tracker.list_users()
         alice, bob = users[0]["id"], users[1]["id"] if len(users) > 1 else users[0]["id"]
 
-    # Add a personal transaction
     tracker.add_personal_transaction(alice, "income", 2000, "2023-12-01", "salary", "Monthly paycheck")
-
-    # Add a shared dinner split 60/40
     tracker.add_shared_expense(
         title="Dinner",
         total_amount=80.0,

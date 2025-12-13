@@ -28,13 +28,17 @@ python app.py
 # open http://127.0.0.1:5000
 ```
 
-## 部署到 Render（例）
-1. 在專案根目錄新增 `requirements.txt`（已包含 Flask、gunicorn）與 `Procfile`（內容 `web: gunicorn app:app --bind 0.0.0.0:$PORT`）。
-2. 將專案推到 GitHub。
-3. Render 建立 New Web Service：連 GitHub repo，Environment 選 Python，Start Command 填 `gunicorn app:app --bind 0.0.0.0:$PORT`。
-4. 新增環境變數：`SECRET_KEY`（強隨機字串）、`DB_PATH`（例如 `/var/data/expenses.db`）。
-5. 加掛 Disk（例：Mount Path `/var/data`）讓 SQLite 檔持久化；若 Mount 到其他路徑，將 `DB_PATH` 指向該檔。
-6. Deploy，拿到網址後手機直接使用。
+## 免費部署推薦：Render Free + Neon Postgres
+- 你不需要付費磁碟，資料放在免費的雲端 Postgres（Neon）。
+- 環境變數：
+  - `SECRET_KEY`: 強隨機字串
+  - `DATABASE_URL`: Neon 提供的連線字串（格式 `postgresql://user:pass@host/db`)
+
+步驟：
+1. 在 Neon 建立免費 Postgres 專案，複製 `postgresql://...` 連線字串。
+2. 在 Render 新建 Blueprint：連結 GitHub repo，分支 main；render.yaml 會自動建立 Web 服務，Start Command `gunicorn app:app --bind 0.0.0.0:$PORT`，方案選 free。
+3. 在 Render 服務設定環境變數：`SECRET_KEY`、`DATABASE_URL`（貼 Neon 的連線字串）。
+4. Deploy，完成後取得網址，手機直接使用。
 
 ## Usage guide (web)
 - Dashboard: shows monthly totals, per-user spending, category breakdown, and suggested settlements. Select month/year in the header.
