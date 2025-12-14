@@ -645,8 +645,9 @@ class ExpenseTracker:
                 payer = int(s["payer_id"])
                 receiver = int(s["receiver_id"])
                 amt = float(s["amount"])
-                net[payer] = net.get(payer, 0.0) - amt
-                net[receiver] = net.get(receiver, 0.0) + amt
+                # Repayment: payer's debt decreases (net increases), receiver's claim decreases (net decreases).
+                net[payer] = net.get(payer, 0.0) + amt
+                net[receiver] = net.get(receiver, 0.0) - amt
 
         settlements = self._settle(net)
         return {"net_by_user": net, "settlements": [s.__dict__ for s in settlements]}
