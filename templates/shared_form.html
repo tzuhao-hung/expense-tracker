@@ -89,16 +89,29 @@
     const template = document.getElementById("participant-row");
     const addBtn = document.getElementById("add-participant");
 
+    function bindRemove(root) {
+      root.querySelectorAll(".remove-row").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.target.closest(".panel").remove();
+        });
+      });
+    }
+
     function addRow() {
       const clone = template.content.cloneNode(true);
-      clone.querySelector(".remove-row").addEventListener("click", (e) => {
-        e.target.closest(".panel").remove();
-      });
+      bindRemove(clone);
       container.appendChild(clone);
     }
     addBtn.addEventListener("click", addRow);
-    // Start with two rows to save clicks.
-    addRow();
-    addRow();
+
+    // If editing and splits are pre-rendered, just bind remove buttons.
+    // Otherwise add a couple of blank rows to start.
+    const hasPrefilled = container.children.length > 0;
+    if (hasPrefilled) {
+      bindRemove(container);
+    } else {
+      addRow();
+      addRow();
+    }
   </script>
 {% endblock %}
